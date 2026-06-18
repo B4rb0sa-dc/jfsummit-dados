@@ -553,6 +553,52 @@
       font-size: 14px;
     }
 
+
+
+    .metric-value-muted {
+      font-size: 16px;
+      font-weight: 900;
+      color: var(--muted);
+      line-height: 1.25;
+    }
+
+    .table-actions {
+      display: flex;
+      align-items: flex-end;
+      gap: 12px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+
+    .table-filter {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      min-width: 220px;
+    }
+
+    .table-filter label {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 800;
+    }
+
+    .table-filter select,
+    .strategic-select {
+      height: 36px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 0 10px;
+      font-size: 13px;
+      background: #ffffff;
+      color: var(--text);
+    }
+
+    .strategic-select {
+      min-width: 170px;
+      font-weight: 700;
+    }
+
     @media (max-width: 1080px) {
       .cards {
         grid-template-columns: repeat(2, 1fr);
@@ -646,6 +692,7 @@
     let selectedAdset = null;
     let currentVisibleItems = [];
     let currentAIContext = null;
+    let currentMetricPreset = "auto";
 
     let sortState = {
       key: "spend",
@@ -682,6 +729,103 @@
       }
     };
 
+    const METRIC_PRESETS = {
+      auto: {
+        label: "Automático por objetivo",
+        resultLabel: "Resultado principal",
+        costLabel: "Custo por resultado"
+      },
+      awareness: {
+        label: "Reconhecimento",
+        resultLabel: "Alcance",
+        costLabel: "CPM alcance"
+      },
+      traffic: {
+        label: "Tráfego",
+        resultLabel: "Cliques no link",
+        costLabel: "CPC"
+      },
+      engagement: {
+        label: "Engajamento",
+        resultLabel: "Interações",
+        costLabel: "Custo por interação"
+      },
+      leads: {
+        label: "Leads",
+        resultLabel: "Leads",
+        costLabel: "CPL"
+      },
+      sales: {
+        label: "Vendas",
+        resultLabel: "Vendas no site",
+        costLabel: "Custo por venda"
+      }
+    };
+
+    const STRATEGIC_OPTIONS = [
+      "Sem direcionamento",
+      "Alterar copy",
+      "Escalar",
+      "Desativar",
+      "Manter em observação"
+    ];
+
+    const ACTION_ALIASES = {
+      purchase: [
+        "purchase",
+        "purchases",
+        "Purchase",
+        "Purchases",
+        "website_purchase",
+        "website_purchases",
+        "omni_purchase",
+        "offsite_conversion.fb_pixel_purchase",
+        "onsite_conversion.purchase"
+      ],
+      initiate_checkout: [
+        "initiate_checkout",
+        "initiate_checkouts",
+        "Initiate Checkout",
+        "offsite_conversion.fb_pixel_initiate_checkout",
+        "onsite_conversion.initiate_checkout"
+      ],
+      landing_page_view: [
+        "landing_page_view",
+        "landing_page_views",
+        "Landing Page View",
+        "landing_page_view_total"
+      ],
+      interactions: [
+        "interactions",
+        "interaction",
+        "Interações",
+        "Interactions",
+        "engagement",
+        "engagements",
+        "post_engagement",
+        "page_engagement",
+        "post_reaction",
+        "comment",
+        "like"
+      ],
+      lead: [
+        "lead",
+        "leads",
+        "Lead",
+        "Leads",
+        "onsite_conversion.lead_grouped",
+        "offsite_conversion.fb_pixel_lead"
+      ],
+      messages: [
+        "messages",
+        "Messages",
+        "messaging_conversation_started_7d",
+        "messaging_conversation_started",
+        "onsite_conversion.messaging_conversation_started_7d",
+        "onsite_conversion.messaging_conversation_started"
+      ]
+    };
+
     function escapeHTML(value) {
       return String(value || "")
         .replace(/&/g, "&amp;")
@@ -693,7 +837,6 @@
 
     function toNumber(value) {
       if (value === null || value === undefined || value === "") return 0;
-
       if (typeof value === "object" && value.value !== undefined) return toNumber(value.value);
       if (typeof value === "object" && value.Value !== undefined) return toNumber(value.Value);
       if (typeof value === "number") return value;
@@ -752,40 +895,79 @@
       return value;
     }
 
+    function normalizeText(value) {
+      return String(value || "")
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .toLowerCase()
+        .trim();
+    }
+
     function getField(object, ...keys) {
       for (const key of keys) {
         if (object && object[key] !== undefined && object[key] !== null && object[key] !== "") {
           return object[key];
         }
       }
-
       return "";
     }
 
-    function getActionValue(actions) {
-      if (!actions) return 0;
-      if (!Array.isArray(actions)) return toNumber(actions);
+    function getRowActions(row) {
+      const actions = getField(row, "actions", "Actions");
+      if (!actions) return [];
 
-      const targetActionTypes = [
-        "onsite_conversion.messaging_conversation_started_7d",
-        "onsite_conversion.messaging_conversation_started",
-        "messaging_conversation_started_7d",
-        "messaging_conversation_started"
-      ];
+      if (typeof actions === "string") {
+        try {
+          const parsed = JSON.parse(actions);
+          return Array.isArray(parsed) ? parsed : [];
+        } catch {
+          return [];
+        }
+      }
 
+      return Array.isArray(actions) ? actions : [];
+    }
+
+    function getActionValueFromActions(row, actionKey) {
+      const actions = getRowActions(row);
+      if (!actions.length) return 0;
+
+      const aliases = (ACTION_ALIASES[actionKey] || []).map(normalizeText);
       return actions.reduce((total, action) => {
-        const type = String(action.action_type || action["Action Type"] || action.type || "").toLowerCase();
-        if (!targetActionTypes.includes(type)) return total;
+        const type = normalizeText(action.action_type || action["Action Type"] || action.type || action.name || "");
+        if (!aliases.includes(type)) return total;
         return total + toNumber(action.value || action.Value || 0);
       }, 0);
     }
 
-    function getMessages(row) {
-      const actions = getField(row, "actions", "Actions");
-      if (actions) return getActionValue(actions);
+    function getActionValue(row, actionKey) {
+      const directAliases = ACTION_ALIASES[actionKey] || [];
+      const directValue = getField(row, ...directAliases);
+      if (directValue !== "") return toNumber(directValue);
 
+      const fromActions = getActionValueFromActions(row, actionKey);
+      if (fromActions > 0) return fromActions;
+
+      const actions = getRowActions(row);
+      const makeIndexes = {
+        purchase: 26,
+        initiate_checkout: 4,
+        landing_page_view: 17,
+        interactions: 22,
+        lead: 46
+      };
+
+      const index = makeIndexes[actionKey];
+      if (index !== undefined && actions[index] !== undefined) return toNumber(actions[index]);
+      if (index !== undefined && actions[index - 1] !== undefined) return toNumber(actions[index - 1]);
+
+      return 0;
+    }
+
+    function getMessages(row) {
       const directMessages = getField(row, "messages", "Messages", "results", "Results");
-      return toNumber(directMessages);
+      if (directMessages !== "") return toNumber(directMessages);
+      return getActionValue(row, "messages");
     }
 
     function getRowDate(row) {
@@ -1008,37 +1190,6 @@
       });
     }
 
-    function calculateTotals(rows) {
-      const totals = rows.reduce((acc, row) => {
-        const spend = toNumber(getField(row, "spend", "Spend"));
-        const messages = getMessages(row);
-        const clicks = toNumber(getField(row, "inline_link_clicks", "Inline Link Clicks", "link_clicks"));
-        const impressions = toNumber(getField(row, "impressions", "Impressions"));
-        const reach = toNumber(getField(row, "reach", "Reach"));
-
-        acc.spend += spend;
-        acc.messages += messages;
-        acc.clicks += clicks;
-        acc.impressions += impressions;
-        acc.reach += reach;
-
-        return acc;
-      }, {
-        spend: 0,
-        messages: 0,
-        clicks: 0,
-        impressions: 0,
-        reach: 0
-      });
-
-      totals.cpl = totals.messages > 0 ? totals.spend / totals.messages : 0;
-      totals.ctr = totals.impressions > 0 ? (totals.clicks / totals.impressions) * 100 : 0;
-      totals.cpm = totals.impressions > 0 ? (totals.spend / totals.impressions) * 1000 : 0;
-      totals.frequency = totals.reach > 0 ? totals.impressions / totals.reach : 0;
-
-      return totals;
-    }
-
     function getLevelConfig(level) {
       return LEVEL_CONFIG[level] || LEVEL_CONFIG.campaign;
     }
@@ -1074,35 +1225,208 @@
       return scopedRows;
     }
 
+    function getCampaignObjective(row) {
+      return getField(
+        row,
+        "campaign_objective",
+        "Campaign Objective",
+        "objective",
+        "Objective",
+        "campaignObjective"
+      ) || getField(dashboardData?.summary || {}, "campaign_objective", "objective");
+    }
+
+    function getObjectiveFromName(row) {
+      const campaignName = normalizeText(getField(row, "campaign_name", "Campaign Name", "Campaign"));
+      if (!campaignName) return "";
+
+      if (campaignName.includes("reconhecimento") || campaignName.includes("alcance") || campaignName.includes("awareness")) return "awareness";
+      if (campaignName.includes("trafego") || campaignName.includes("traffic") || campaignName.includes("clique")) return "traffic";
+      if (campaignName.includes("engajamento") || campaignName.includes("engagement") || campaignName.includes("interacao")) return "engagement";
+      if (campaignName.includes("lead")) return "leads";
+      if (campaignName.includes("venda") || campaignName.includes("sales") || campaignName.includes("purchase") || campaignName.includes("compra")) return "sales";
+
+      return "";
+    }
+
+    function objectiveToPreset(row) {
+      const objective = normalizeText(getCampaignObjective(row));
+
+      if (objective.includes("awareness") || objective.includes("recognition") || objective.includes("reconhecimento") || objective.includes("reach") || objective.includes("brand_awareness")) return "awareness";
+      if (objective.includes("traffic") || objective.includes("trafego") || objective.includes("link_clicks")) return "traffic";
+      if (objective.includes("engagement") || objective.includes("engajamento") || objective.includes("post_engagement") || objective.includes("messages")) return "engagement";
+      if (objective.includes("lead")) return "leads";
+      if (objective.includes("sales") || objective.includes("vendas") || objective.includes("conversions") || objective.includes("conversion") || objective.includes("purchase")) return "sales";
+
+      return getObjectiveFromName(row) || "traffic";
+    }
+
+    function getPresetForRow(row) {
+      if (currentMetricPreset !== "auto") return currentMetricPreset;
+      return objectiveToPreset(row);
+    }
+
+    function getObjectiveLabel(row) {
+      const preset = objectiveToPreset(row);
+      return METRIC_PRESETS[preset]?.label || safeText(getCampaignObjective(row), "Não informado");
+    }
+
+    function calculateRowResult(row) {
+      const preset = getPresetForRow(row);
+      const config = METRIC_PRESETS[preset] || METRIC_PRESETS.traffic;
+      const spend = toNumber(getField(row, "spend", "Spend"));
+      const reach = toNumber(getField(row, "reach", "Reach"));
+      const clicks = toNumber(getField(row, "inline_link_clicks", "Inline Link Clicks", "link_clicks", "Link Clicks"));
+      const interactions = getActionValue(row, "interactions");
+      const leads = getActionValue(row, "lead");
+      const purchases = getActionValue(row, "purchase");
+
+      let value = 0;
+      let cost = 0;
+
+      if (preset === "awareness") {
+        value = reach;
+        cost = reach > 0 ? (spend / reach) * 1000 : 0;
+      } else if (preset === "traffic") {
+        value = clicks;
+        cost = clicks > 0 ? spend / clicks : 0;
+      } else if (preset === "engagement") {
+        value = interactions;
+        cost = interactions > 0 ? spend / interactions : 0;
+      } else if (preset === "leads") {
+        value = leads;
+        cost = leads > 0 ? spend / leads : 0;
+      } else if (preset === "sales") {
+        value = purchases;
+        cost = purchases > 0 ? spend / purchases : 0;
+      }
+
+      return {
+        preset,
+        resultType: config.resultLabel,
+        costType: config.costLabel,
+        resultValue: value,
+        resultCost: cost,
+        purchases,
+        initiateCheckouts: getActionValue(row, "initiate_checkout"),
+        landingPageViews: getActionValue(row, "landing_page_view"),
+        interactions,
+        leads,
+        messages: getMessages(row)
+      };
+    }
+
+    function mergeResultMetadata(types) {
+      const unique = Array.from(new Set(types.filter(Boolean)));
+      if (!unique.length) return "Resultado";
+      if (unique.length === 1) return unique[0];
+      return "Misto";
+    }
+
+    function calculateTotals(rows) {
+      const totals = rows.reduce((acc, row) => {
+        const spend = toNumber(getField(row, "spend", "Spend"));
+        const clicks = toNumber(getField(row, "inline_link_clicks", "Inline Link Clicks", "link_clicks", "Link Clicks"));
+        const impressions = toNumber(getField(row, "impressions", "Impressions"));
+        const reach = toNumber(getField(row, "reach", "Reach"));
+        const result = calculateRowResult(row);
+
+        acc.spend += spend;
+        acc.resultValue += result.resultValue;
+        acc.clicks += clicks;
+        acc.impressions += impressions;
+        acc.reach += reach;
+        acc.purchases += result.purchases;
+        acc.initiateCheckouts += result.initiateCheckouts;
+        acc.landingPageViews += result.landingPageViews;
+        acc.interactions += result.interactions;
+        acc.leads += result.leads;
+        acc.messages += result.messages;
+        acc.resultTypes.push(result.resultType);
+        acc.costTypes.push(result.costType);
+
+        return acc;
+      }, {
+        spend: 0,
+        resultValue: 0,
+        clicks: 0,
+        impressions: 0,
+        reach: 0,
+        purchases: 0,
+        initiateCheckouts: 0,
+        landingPageViews: 0,
+        interactions: 0,
+        leads: 0,
+        messages: 0,
+        resultTypes: [],
+        costTypes: []
+      });
+
+      totals.resultType = mergeResultMetadata(totals.resultTypes);
+      totals.costType = mergeResultMetadata(totals.costTypes);
+      totals.resultCost = totals.resultValue > 0
+        ? (totals.costType === "CPM alcance" ? (totals.spend / totals.resultValue) * 1000 : totals.spend / totals.resultValue)
+        : 0;
+      totals.ctr = totals.impressions > 0 ? (totals.clicks / totals.impressions) * 100 : 0;
+      totals.cpm = totals.impressions > 0 ? (totals.spend / totals.impressions) * 1000 : 0;
+      totals.frequency = totals.reach > 0 ? totals.impressions / totals.reach : 0;
+
+      return totals;
+    }
+
     function groupRowsByLevel(rows, level) {
-      const config = getLevelConfig(level);
       const groups = new Map();
       const statusSources = getStatusSources();
 
       rows.forEach(row => {
         const entity = getEntityFromRow(row, level);
         const key = entity.id || entity.name || "sem-identificacao";
+        const campaign = getEntityFromRow(row, "campaign");
+        const adset = getEntityFromRow(row, "adset");
 
         if (!groups.has(key)) {
           groups.set(key, {
             name: entity.name,
             id: entity.id,
+            campaignName: campaign.name,
+            campaignId: campaign.id,
+            adsetName: adset.name,
+            adsetId: adset.id,
             spend: 0,
-            messages: 0,
+            resultValue: 0,
             clicks: 0,
             impressions: 0,
             reach: 0,
+            purchases: 0,
+            initiateCheckouts: 0,
+            landingPageViews: 0,
+            interactions: 0,
+            leads: 0,
+            messages: 0,
             days: new Set(),
-            statuses: []
+            statuses: [],
+            objectives: [],
+            resultTypes: [],
+            costTypes: []
           });
         }
 
         const item = groups.get(key);
+        const result = calculateRowResult(row);
         item.spend += toNumber(getField(row, "spend", "Spend"));
-        item.messages += getMessages(row);
-        item.clicks += toNumber(getField(row, "inline_link_clicks", "Inline Link Clicks", "link_clicks"));
+        item.resultValue += result.resultValue;
+        item.clicks += toNumber(getField(row, "inline_link_clicks", "Inline Link Clicks", "link_clicks", "Link Clicks"));
         item.impressions += toNumber(getField(row, "impressions", "Impressions"));
         item.reach += toNumber(getField(row, "reach", "Reach"));
+        item.purchases += result.purchases;
+        item.initiateCheckouts += result.initiateCheckouts;
+        item.landingPageViews += result.landingPageViews;
+        item.interactions += result.interactions;
+        item.leads += result.leads;
+        item.messages += result.messages;
+        item.resultTypes.push(result.resultType);
+        item.costTypes.push(result.costType);
+        item.objectives.push(getObjectiveLabel(row));
 
         const rowKey = getDateKeyFromValue(getRowDate(row));
         if (rowKey) item.days.add(rowKey);
@@ -1113,11 +1437,20 @@
 
       return Array.from(groups.values()).map(item => {
         const status = resolveStatusFromValues(item.statuses);
+        const resultType = mergeResultMetadata(item.resultTypes);
+        const costType = mergeResultMetadata(item.costTypes);
+        const objectiveLabel = mergeResultMetadata(item.objectives);
+
         return {
           ...item,
           status,
           statusLabel: translateDisplayStatus(status),
-          cpl: item.messages > 0 ? item.spend / item.messages : 0,
+          objectiveLabel,
+          resultType,
+          costType,
+          resultCost: item.resultValue > 0
+            ? (costType === "CPM alcance" ? (item.spend / item.resultValue) * 1000 : item.spend / item.resultValue)
+            : 0,
           ctr: item.impressions > 0 ? (item.clicks / item.impressions) * 100 : 0,
           cpm: item.impressions > 0 ? (item.spend / item.impressions) * 1000 : 0,
           frequency: item.reach > 0 ? item.impressions / item.reach : 0,
@@ -1134,7 +1467,7 @@
         let valueA = a[key];
         let valueB = b[key];
 
-        if (key === "name" || key === "statusLabel") {
+        if (["name", "statusLabel", "objectiveLabel", "resultType", "costType"].includes(key)) {
           valueA = String(valueA || "").toLowerCase();
           valueB = String(valueB || "").toLowerCase();
           if (valueA < valueB) return direction === "asc" ? -1 : 1;
@@ -1153,7 +1486,7 @@
         sortState.direction = sortState.direction === "asc" ? "desc" : "asc";
       } else {
         sortState.key = key;
-        sortState.direction = key === "name" || key === "statusLabel" ? "asc" : "desc";
+        sortState.direction = ["name", "statusLabel", "objectiveLabel", "resultType", "costType"].includes(key) ? "asc" : "desc";
       }
 
       renderDashboard(currentPeriod, currentCustomStart, currentCustomEnd);
@@ -1178,6 +1511,13 @@
         key: "spend",
         direction: "desc"
       };
+    }
+
+    function changeMetricPreset() {
+      const select = document.getElementById("metricPresetSelect");
+      currentMetricPreset = select ? select.value : "auto";
+      resetSort();
+      renderDashboard(currentPeriod, currentCustomStart, currentCustomEnd);
     }
 
     function goToLevel(level) {
@@ -1302,6 +1642,16 @@
     }
 
     function buildCards(totals) {
+      const hasSelectedCampaign = Boolean(selectedCampaign);
+      const resultValue = hasSelectedCampaign
+        ? `<div class="metric-value">${formatNumber(totals.resultValue)}</div>`
+        : `<div class="metric-value-muted">Selecione uma campanha</div>`;
+      const resultCostValue = hasSelectedCampaign
+        ? `<div class="metric-value">${formatMoney(totals.resultCost)}</div>`
+        : `<div class="metric-value-muted">Selecione uma campanha</div>`;
+      const resultHelper = hasSelectedCampaign ? totals.resultType : "Disponível ao abrir uma campanha";
+      const costHelper = hasSelectedCampaign ? totals.costType : "Disponível ao abrir uma campanha";
+
       return `
         <section class="cards">
           <div class="metric-card">
@@ -1310,14 +1660,14 @@
             <div class="metric-helper">Soma do escopo atual</div>
           </div>
           <div class="metric-card">
-            <div class="metric-label">Mensagens</div>
-            <div class="metric-value">${formatNumber(totals.messages)}</div>
-            <div class="metric-helper">Resultado principal</div>
+            <div class="metric-label">Resultado</div>
+            ${resultValue}
+            <div class="metric-helper">${escapeHTML(resultHelper)}</div>
           </div>
           <div class="metric-card">
-            <div class="metric-label">Custo por mensagem</div>
-            <div class="metric-value">${formatMoney(totals.cpl)}</div>
-            <div class="metric-helper">Investimento / mensagens</div>
+            <div class="metric-label">Custo por resultado</div>
+            ${resultCostValue}
+            <div class="metric-helper">${escapeHTML(costHelper)}</div>
           </div>
           <div class="metric-card">
             <div class="metric-label">CTR</div>
@@ -1348,13 +1698,48 @@
       `;
     }
 
+    function strategicStorageKey(item) {
+      return `strategic_direction_${item.id || item.name || "sem-id"}`;
+    }
+
+    function getStrategicDirection(item) {
+      try {
+        return localStorage.getItem(strategicStorageKey(item)) || "Sem direcionamento";
+      } catch {
+        return "Sem direcionamento";
+      }
+    }
+
+    function saveStrategicDirection(index, value) {
+      const item = currentVisibleItems[index];
+      if (!item) return;
+
+      try {
+        localStorage.setItem(strategicStorageKey(item), value);
+      } catch {}
+    }
+
+    function buildStrategicSelect(item, index) {
+      const currentValue = getStrategicDirection(item);
+      const options = STRATEGIC_OPTIONS.map(option => `
+        <option value="${escapeHTML(option)}" ${option === currentValue ? "selected" : ""}>${escapeHTML(option)}</option>
+      `).join("");
+
+      return `
+        <select class="strategic-select" onchange="saveStrategicDirection(${index}, this.value)" onclick="event.stopPropagation()">
+          ${options}
+        </select>
+      `;
+    }
+
     function buildTableRows(items) {
       const config = getLevelConfig(currentView);
+      const columnCount = currentView === "ad" ? 16 : 15;
 
       if (!items.length) {
         return `
           <tr>
-            <td colspan="13">
+            <td colspan="${columnCount}">
               <div class="empty-state">Nenhum dado encontrado para o período ou escopo selecionado.</div>
             </td>
           </tr>
@@ -1366,6 +1751,7 @@
         const deliveryLabel = normalizeMetaStatus(item.status) === "ACTIVE" ? "Ativo" : "Inativo";
         const deliveryClass = normalizeMetaStatus(item.status) === "ACTIVE" ? "" : "off";
         const nextIcon = isClickable ? `<span class="drill-icon" title="${config.nextLabel}">›</span>` : "";
+        const strategicColumn = currentView === "ad" ? `<td>${buildStrategicSelect(item, index)}</td>` : "";
 
         return `
           <tr class="${isClickable ? "clickable-row" : ""}" ${isClickable ? `onclick="drillIntoVisible(${index})"` : ""}>
@@ -1383,8 +1769,10 @@
             </td>
             <td>${buildStatusBadge(item.status)}</td>
             <td><span class="delivery"><span class="delivery-dot ${deliveryClass}"></span>${deliveryLabel}</span></td>
-            <td class="numeric">${formatNumber(item.messages)}</td>
-            <td class="numeric">${formatMoney(item.cpl)}</td>
+            <td>${escapeHTML(item.objectiveLabel)}</td>
+            <td>${escapeHTML(item.resultType)}</td>
+            <td class="numeric">${formatNumber(item.resultValue)}</td>
+            <td class="numeric">${formatMoney(item.resultCost)}</td>
             <td class="numeric">${formatNumber(item.clicks)}</td>
             <td class="numeric">${formatPercent(item.ctr)}</td>
             <td class="numeric">${formatMoney(item.spend)}</td>
@@ -1393,14 +1781,33 @@
             <td class="numeric">${formatMoney(item.cpm)}</td>
             <td class="numeric">${formatDecimal(item.frequency)}</td>
             <td class="numeric">${item.daysCount}</td>
+            ${strategicColumn}
           </tr>
         `;
       }).join("");
     }
 
+    function buildMetricPresetSelect() {
+      return `
+        <div class="table-filter">
+          <label>Métrica da tabela</label>
+          <select id="metricPresetSelect" onchange="changeMetricPreset()">
+            <option value="auto" ${currentMetricPreset === "auto" ? "selected" : ""}>Automático por objetivo</option>
+            <option value="awareness" ${currentMetricPreset === "awareness" ? "selected" : ""}>Reconhecimento</option>
+            <option value="traffic" ${currentMetricPreset === "traffic" ? "selected" : ""}>Tráfego</option>
+            <option value="engagement" ${currentMetricPreset === "engagement" ? "selected" : ""}>Engajamento</option>
+            <option value="leads" ${currentMetricPreset === "leads" ? "selected" : ""}>Leads</option>
+            <option value="sales" ${currentMetricPreset === "sales" ? "selected" : ""}>Vendas</option>
+          </select>
+        </div>
+      `;
+    }
+
     function buildTable(visibleItems, totalItems) {
       const config = getLevelConfig(currentView);
       const limitInfo = `Exibindo ${visibleItems.length} de ${totalItems} ${config.label.toLowerCase()}.`;
+      const strategicHeader = currentView === "ad" ? `<th>Direcionamento estratégico</th>` : "";
+      const minWidth = currentView === "ad" ? "1720px" : "1540px";
 
       return `
         <section class="table-card">
@@ -1409,18 +1816,23 @@
               <h3 class="table-title">${config.title}</h3>
               <p class="table-subtitle">${config.subtitle}</p>
             </div>
-            <p class="table-subtitle">${limitInfo}</p>
+            <div class="table-actions">
+              ${buildMetricPresetSelect()}
+              <p class="table-subtitle">${limitInfo}</p>
+            </div>
           </div>
 
           <div class="table-wrapper">
-            <table>
+            <table style="min-width: ${minWidth};">
               <thead>
                 <tr>
                   <th>${buildSortableHeader(config.singular, "name")}</th>
-                  <th>${buildSortableHeader("Status", "statusLabel")}</th>
+                  <th>${buildSortableHeader("Status Meta", "statusLabel")}</th>
                   <th>Veiculação</th>
-                  <th>${buildSortableHeader("Mensagens", "messages")}</th>
-                  <th>${buildSortableHeader("Custo/mensagem", "cpl")}</th>
+                  <th>${buildSortableHeader("Objetivo", "objectiveLabel")}</th>
+                  <th>${buildSortableHeader("Tipo de resultado", "resultType")}</th>
+                  <th>${buildSortableHeader("Resultado", "resultValue")}</th>
+                  <th>${buildSortableHeader("Custo por resultado", "resultCost")}</th>
                   <th>${buildSortableHeader("Cliques", "clicks")}</th>
                   <th>${buildSortableHeader("CTR", "ctr")}</th>
                   <th>${buildSortableHeader("Investimento", "spend")}</th>
@@ -1429,6 +1841,7 @@
                   <th>${buildSortableHeader("CPM", "cpm")}</th>
                   <th>${buildSortableHeader("Frequência", "frequency")}</th>
                   <th>${buildSortableHeader("Dias", "daysCount")}</th>
+                  ${strategicHeader}
                 </tr>
               </thead>
               <tbody>
@@ -1465,24 +1878,35 @@
         nivel_visualizado: config.label,
         campanha_selecionada: campaignLabel,
         conjunto_selecionado: adsetLabel,
-        objetivo: "geracao_de_mensagens_ou_leads",
+        preset_de_metrica: METRIC_PRESETS[currentMetricPreset]?.label || "Automático por objetivo",
         resumo: {
           investimento_total: scopedTotals.spend,
-          mensagens: scopedTotals.messages,
-          custo_por_mensagem: scopedTotals.cpl,
+          tipo_de_resultado: scopedTotals.resultType,
+          resultado: selectedCampaign ? scopedTotals.resultValue : "Selecione uma campanha",
+          tipo_de_custo_por_resultado: scopedTotals.costType,
+          custo_por_resultado: selectedCampaign ? scopedTotals.resultCost : "Selecione uma campanha",
           cliques: scopedTotals.clicks,
           ctr: scopedTotals.ctr,
           impressoes: scopedTotals.impressions,
           alcance: scopedTotals.reach,
           cpm: scopedTotals.cpm,
-          frequencia: scopedTotals.frequency
+          frequencia: scopedTotals.frequency,
+          compras: scopedTotals.purchases,
+          checkouts_iniciados: scopedTotals.initiateCheckouts,
+          visualizacoes_de_pagina: scopedTotals.landingPageViews,
+          interacoes: scopedTotals.interactions,
+          leads: scopedTotals.leads,
+          mensagens: scopedTotals.messages
         },
-        linhas_analisadas: visibleItems.map(item => ({
+        linhas_analisadas: visibleItems.slice(0, 5).map(item => ({
           nome: item.name,
           id: item.id,
-          status: item.statusLabel,
-          mensagens: item.messages,
-          custo_por_mensagem: item.cpl,
+          status_meta: item.statusLabel,
+          objetivo: item.objectiveLabel,
+          tipo_de_resultado: item.resultType,
+          resultado: item.resultValue,
+          tipo_de_custo_por_resultado: item.costType,
+          custo_por_resultado: item.resultCost,
           cliques: item.clicks,
           ctr: item.ctr,
           investimento: item.spend,
@@ -1490,7 +1914,8 @@
           alcance: item.reach,
           cpm: item.cpm,
           frequencia: item.frequency,
-          dias: item.daysCount
+          dias: item.daysCount,
+          direcionamento_estrategico: currentView === "ad" ? getStrategicDirection(item) : undefined
         }))
       };
     }
