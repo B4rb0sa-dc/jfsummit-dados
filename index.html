@@ -1969,42 +1969,9 @@
     }
 
     async function generateAIAnalysis() {
-      const button = document.getElementById("aiAnalysisButton");
       const output = document.getElementById("aiAnalysisOutput");
-
-      if (!button || !output) return;
-
-      if (!currentAIContext || !currentAIContext.linhas_analisadas.length) {
-        output.textContent = "Não há dados suficientes para gerar a análise.";
-        return;
-      }
-
-      button.disabled = true;
-      button.textContent = "Gerando análise...";
-      output.textContent = "Analisando métricas, aguarde...";
-
-      try {
-        const response = await fetch("/api/ai-analysis", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json"
-          },
-          body: JSON.stringify(currentAIContext)
-        });
-
-        if (!response.ok) {
-          throw new Error("Não foi possível gerar a análise com IA. Verifique a rota /api/ai-analysis ou o cenário do Make.");
-        }
-
-        const data = await response.json();
-        const analysis = data.analysis || data.ai_analysis || "";
-        output.textContent = analysis || "A IA não retornou uma análise para esses dados.";
-      } catch (error) {
-        output.textContent = error.message;
-      } finally {
-        button.disabled = false;
-        button.textContent = "Gerar análise com IA";
-      }
+      if (!output) return;
+      output.textContent = "Serviço em desenvolvimento! Em breve vamos atualizar nosso sistema.!";
     }
 
     function getDefaultCustomRange() {
