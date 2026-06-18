@@ -597,6 +597,37 @@
     .strategic-select {
       min-width: 170px;
       font-weight: 700;
+      transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+    }
+
+    .strategic-default {
+      background: #ffffff;
+      color: var(--text);
+      border-color: var(--line);
+    }
+
+    .strategic-disable {
+      background: #fee4e2;
+      color: #912018;
+      border-color: #fecdca;
+    }
+
+    .strategic-copy {
+      background: #fef0c7;
+      color: #93370d;
+      border-color: #fedf89;
+    }
+
+    .strategic-scale {
+      background: #dcfae6;
+      color: #067647;
+      border-color: #abefc6;
+    }
+
+    .strategic-watch {
+      background: #d1e9ff;
+      color: #175cd3;
+      border-color: #b2ddff;
     }
 
     @media (max-width: 1080px) {
@@ -1710,6 +1741,16 @@
       }
     }
 
+    function getStrategicDirectionClass(value) {
+      const normalizedValue = String(value || "").trim().toLowerCase();
+
+      if (normalizedValue === "desativar") return "strategic-disable";
+      if (normalizedValue === "alterar copy") return "strategic-copy";
+      if (normalizedValue === "escalar") return "strategic-scale";
+      if (normalizedValue === "manter em observação" || normalizedValue === "manter em observacao") return "strategic-watch";
+      return "strategic-default";
+    }
+
     function saveStrategicDirection(index, value) {
       const item = currentVisibleItems[index];
       if (!item) return;
@@ -1719,14 +1760,21 @@
       } catch {}
     }
 
+    function updateStrategicSelect(index, selectElement) {
+      if (!selectElement) return;
+      saveStrategicDirection(index, selectElement.value);
+      selectElement.className = `strategic-select ${getStrategicDirectionClass(selectElement.value)}`;
+    }
+
     function buildStrategicSelect(item, index) {
       const currentValue = getStrategicDirection(item);
+      const currentClass = getStrategicDirectionClass(currentValue);
       const options = STRATEGIC_OPTIONS.map(option => `
         <option value="${escapeHTML(option)}" ${option === currentValue ? "selected" : ""}>${escapeHTML(option)}</option>
       `).join("");
 
       return `
-        <select class="strategic-select" onchange="saveStrategicDirection(${index}, this.value)" onclick="event.stopPropagation()">
+        <select class="strategic-select ${currentClass}" onchange="updateStrategicSelect(${index}, this)" onclick="event.stopPropagation()">
           ${options}
         </select>
       `;
